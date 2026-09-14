@@ -195,7 +195,7 @@ def build_email_html(stocks, run_date):
 def send_email(subject, html_body):
     gmail_user = os.environ["GMAIL_USER"]
     gmail_password = os.environ["GMAIL_APP_PASSWORD"]
-    recipient = os.environ.get("RECIPIENT_EMAIL", "avin.khurana18@gmail.com")
+    recipient = os.environ.get("RECIPIENT_EMAIL") or "avin.khurana18@gmail.com"
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
