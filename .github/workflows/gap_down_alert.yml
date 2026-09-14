@@ -1,0 +1,33 @@
+name: Gap Down Alert
+
+on:
+  schedule:
+    # Two triggers cover both US Central Time offsets; the script itself
+    # checks the current Central-Time hour and only runs the scan on the
+    # one that actually lands at 6pm local time (handles DST automatically).
+    - cron: "0 23 * * *" # 6pm CDT (UTC-5), roughly mid-March to early November
+    - cron: "0 0 * * *"  # 6pm CST (UTC-6), roughly early November to mid-March
+  workflow_dispatch: {}
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run gap-down scanner
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          # Manual runs (workflow_dispatch) always execute regardless of
+          # the current time, so you can test on demand.
+          FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+        run: python gap_down_scanner.py
