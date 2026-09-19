@@ -19,8 +19,13 @@ from zoneinfo import ZoneInfo
 import yfinance as yf
 
 CENTRAL_TZ = ZoneInfo("America/Chicago")
-TARGET_HOUR = 18  # 6 PM Central
+# GitHub Actions cron schedules routinely fire late (observed delays of up to
+# several hours, worst near the top of the hour), so we accept any run in a
+# broad post-market-close window rather than requiring an exact hour match.
+EARLIEST_HOUR = 15  # 3 PM Central (US markets close 3pm CT / 4pm ET)
+LATEST_HOUR = 23    # 11 PM Central
 GAP_THRESHOLD_PCT = -5.0
+STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "last_run_date.txt")
 
 # Candidate universe of large-cap US tickers. The script ranks these by
 # live market cap each run and keeps the top 30, so it stays accurate as
@@ -50,15 +55,30 @@ class StockAlert:
 
 
 def is_scheduled_run_time() -> bool:
-    """Only proceed around 6pm Central. GitHub Actions triggers this workflow
-    at two fixed UTC times to cover both CDT and CST; whichever one lands
-    near 6pm local time is the one that actually runs the scan."""
+    """Only proceed on weekday evenings, in the window after market close.
+    GitHub Actions triggers this workflow at two fixed UTC times to cover
+    both CDT and CST; whichever fires first each day is the one that ends
+    up sending (see already_ran_today), so this just needs to reject clearly
+    wrong times (weekends, the middle of the night)."""
     if os.environ.get("FORCE_RUN") == "1":
         return True
     now = datetime.now(CENTRAL_TZ)
     if now.weekday() >= 5:  # Saturday/Sunday, markets closed
         return False
-    return now.hour == TARGET_HOUR
+    return EARLIEST_HOUR <= now.hour <= LATEST_HOUR
+
+
+def already_ran_today(run_date: str) -> bool:
+    try:
+        with open(STATE_FILE) as f:
+            return f.read().strip() == run_date
+    except FileNotFoundError:
+        return False
+
+
+def mark_ran_today(run_date: str) -> None:
+    with open(STATE_FILE, "w") as f:
+        f.write(run_date)
 
 
 def fetch_top30_by_market_cap():
@@ -209,11 +229,16 @@ def send_email(subject, html_body):
 
 
 def main():
+    run_date = datetime.now(CENTRAL_TZ).strftime("%Y-%m-%d")
+
     if not is_scheduled_run_time():
-        print("Not the scheduled Central-Time hour (or a weekend); skipping.")
+        print("Outside the post-market-close window (or a weekend); skipping.")
         return
 
-    run_date = datetime.now(CENTRAL_TZ).strftime("%Y-%m-%d")
+    if os.environ.get("FORCE_RUN") != "1" and already_ran_today(run_date):
+        print(f"Already sent today's report ({run_date}); skipping duplicate run.")
+        return
+
     top30 = fetch_top30_by_market_cap()
     if len(top30) < 20:
         print(
@@ -232,6 +257,7 @@ def main():
 
     html = build_email_html(gap_downs, run_date)
     send_email(subject, html)
+    mark_ran_today(run_date)
     print(f"Sent report: {subject}")
 
 

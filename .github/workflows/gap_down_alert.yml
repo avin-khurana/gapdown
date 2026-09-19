@@ -3,15 +3,19 @@ name: Gap Down Alert
 on:
   schedule:
     # Two triggers cover both US Central Time offsets; the script itself
-    # checks the current Central-Time hour and only runs the scan on the
-    # one that actually lands at 6pm local time (handles DST automatically).
-    - cron: "0 23 * * *" # 6pm CDT (UTC-5), roughly mid-March to early November
-    - cron: "0 0 * * *"  # 6pm CST (UTC-6), roughly early November to mid-March
+    # accepts any post-market-close time and only sends once per day (see
+    # already_ran_today), so whichever fires first each day wins. Minutes
+    # are offset from :00 because GitHub documents top-of-hour schedules as
+    # the most likely to be delayed.
+    - cron: "13 23 * * *" # ~6pm CDT (UTC-5), roughly mid-March to early November
+    - cron: "13 0 * * *"  # ~6pm CST (UTC-6), roughly early November to mid-March
   workflow_dispatch: {}
 
 jobs:
   scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -31,3 +35,14 @@ jobs:
           # the current time, so you can test on demand.
           FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
         run: python gap_down_scanner.py
+
+      - name: Persist last-run state
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain last_run_date.txt)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add last_run_date.txt
+            git commit -m "Record last sent report date [skip ci]"
+            git push
+          fi
